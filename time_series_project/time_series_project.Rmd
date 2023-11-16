@@ -1,0 +1,148 @@
+---
+title: "Zaman Serileri Analizi Emir Doğan"
+author: "temel_islemler.Rdm"
+date: "2023-11-15"
+output:
+  html_document:
+    df_print: paged
+---
+Muhammed Emir Doğan
+
+# Veriyi Kaggle'dan aldım. Bu veri 2000 ile 2022 yılları arasında Gümüş fiyatlarının günlük Açılış, En Yüksek, En Düşük, Kapanış fiyatlarını ve günlük hacmini Dolar (USD) cinsinden göstermektedir. Bu veri borsa verisi olduğundan hafta sonları yoktur ve bu nedenle verimizi aylık veriye çevirmemiz gerekmektedir.
+
+```{r, warning=FALSE, message=FALSE}
+library(lubridate)
+library(fpp2)
+library(dplyr)
+library(readr)
+silver <- read.csv("C:/Users/emird/OneDrive/Masaüstü/time_series_vize/silver.csv")
+
+View(silver)
+head(silver)
+```
+
+# Zamana bağlı aylık kapanış fiyatlarını inceleyelim. Önce günlük zaman serisi oluşturup tarih kısmını yıl-ay-hafta olarak ayrıştırarak aylığa çeviriyoruz.
+
+```{r}
+silver_ts <- ts(silver$Close, start = decimal_date(as.Date("2000-01-04")), frequency = 365)
+head(silver_ts)
+```
+
+# Verimizi tarih kısmını yıl-ay-hafta olarak ayrıştıralım. 
+
+```{r}
+silver$Year <- year(silver$Date)
+silver$Month <- month(silver$Date)
+silver$Week <- week(silver$Date)
+
+as_tibble(silver)
+View(silver)
+```
+
+# Artık verimizi aylık veri haline getirebiliriz.
+
+```{r}
+silver%>%group_by(Year,Month)%>%summarise(mean_close = mean(Close)) -> aylık_veri
+silver%>%group_by()
+
+head(aylık_veri)
+```
+
+# Soru 1 : Zaman serisi grafiği çizdiriniz.
+
+```{r}
+aylık_silver_ts <- ts(aylık_veri$mean_close, start = c(2000,1), frequency = 12)
+autoplot(aylık_silver_ts)+
+  xlab("Date")+
+  ylab("Silver Price")+
+  ggtitle("Monthly Silver Price")
+```
+
+# Soru 2 : Verinizde otokorelasyon olup olmadığını ACF grafiği ve Lijung Box test kullanarak inceleyip yorumlayınız.
+
+# Grafikte 120 gecikme yani 120 önceki değere kadar otokorelasyon hesaplamasını söyledik. Son değerler ilk değerlere göre çok büyük olduğu için böyle bir grafik ortaya çıkmıştır. Yani burada bir mevsimsellikten söz edemeyiz ancak grafiğe bakarak bir trend olduğunu görmek mümkündür.
+# Ljung Box testi kullandığımızda ise p-value<0.05. Buradaki H0:Otokorelasyon yoktur hipotezi p-value<0.05 olduğundan reddedilir. Yani otokorelasyon vardır ancak bir mevsimsellikten söz edemeyiz.
+
+```{r}
+ggAcf(aylık_silver_ts, lag.max = 120) +
+ggtitle("Otokorelasyon Fonksiyonu Grafiği")
+
+length(aylık_silver_ts)/5
+Box.test(aylık_silver_ts, lag = 10, type = "Lj")
+```
+
+# Soru 3 : Verinizde mevsimsellik olup olmadığını mevsimsellik grafikleri kullanarak inceleyiniz.
+
+# Mevsimsellik grafiklerine baktığımzda her sezon farklı bir grafik oluştuğundan mevsimsellik yoktur denilebilir.
+
+```{r}
+ggseasonplot(aylık_silver_ts, year.labels = TRUE)
+ggseasonplot(aylık_silver_ts, year.labels = TRUE, polar = TRUE)
+```
+
+# Yatay çizgiler her ayın ortalamasını gösterir ancak bu grafiğe de bakarsak aylık ortalamalar sabit gözükmektedir ve aylık ortalamalrda bir mevsimsellik yoktur.
+
+```{r}
+ggsubseriesplot(x = aylık_silver_ts) +
+ylab("Close Price") +
+ggtitle("Aylık Gümüş Fiyatlrı Mevsimsel Alt Seri Grafiği")
+```
+
+# Soru 4 : Verinizi son 20 gözlemi test ve öncesini train olarak ayrıştırın.
+
+```{r}
+set.seed(123)
+train_ts <- window(aylık_silver_ts, end = c(2021, 01))
+test_ts <- window(aylık_silver_ts, start = c(2021, 02))
+# length(test_ts)
+```
+
+
+```{r}
+set.seed(123)
+model1 <- meanf(train_ts,20)
+model2 <- snaive(train_ts,20)
+model3 <- rwf(train_ts,20)
+```
+
+# Soru 5 : Bu kurduğumuz modellerin test set ve training set tahmin performanslarını grafik üzerinden gösteriniz.
+
+```{r, warning=FALSE}
+autoplot(aylık_silver_ts)+autolayer(model1, series = "mean", PI = FALSE)+
+  autolayer(model2, series = "seosonal naive", PI = FALSE)+autolayer(model3, series = "Naïve ", PI = FALSE)+
+  autolayer(fitted(model1), series = "fitted model1")+autolayer(fitted(model2), series = "fitted model2")+
+  autolayer(fitted(model3), series = "fitted model3")
+```
+
+# Soru 6 : Kurduğumuz modellerin test seti ve training set üzerindeki RMSE değerlerini bulunuz.
+
+# Model1 için Training set RMSE'si "8.456276"  iken Test set RMSE'si "8.790334" 'dir.
+# Model2 için Training set RMSE'si "5.434236"  iken Test set RMSE'si "6.979750" 'dir.
+# Model3 için Training set RMSE'si "1.388501"  iken Test set RMSE'si "3.495002" 'dir.   
+
+```{r}
+set.seed(123)
+accuracy(model1,test_ts)
+accuracy(model2,test_ts)
+accuracy(model3,test_ts)
+```
+
+# Soru 7 : Kurduğunuz 3 modelden test seti forcasting performansı daha iyi olan için model varsayımlarını kontrol edip yorumlayınız.
+
+# Forcesting performansı en iyi olan model "model3" olduğundan "model3" için varsayımları kontrol edelim.
+# Burada H0:Otokorelasyon yoktur hipotezidir ve p-value = 0.0008231 yani 0'a çok yakın olduğundan HO'ı reddettik. Yani otokorelasyon vardır denilebilir.
+
+```{r}
+checkresiduals(model3)
+```
+
+# Soru 8 :  Test seti forcasting performansı daha iyi olan modele uygun lambda değerini belirleyip box-cox dönüşümünü yapalım. Bu kurduğumuz modelin test set RMSE değeri nedir ?
+
+# Kurduğumuz modeller arasında forcasting performansı (mape ve rmse değerlerine baktığımızda) en iyi naive model olarak gözükmektedir. Naive modele Box-Cox dönüşümü uygulayarak kurduğumuz modelin test set RMSE değeri "5.592709" olarak bulunmuştur.
+
+```{r}
+set.seed(123)
+lamda<-BoxCox.lambda(train_ts)
+model3<-rwf(train_ts,lambda = lamda, h = 50, biasadj = TRUE)
+accuracy(model3, aylık_silver_ts)
+```
